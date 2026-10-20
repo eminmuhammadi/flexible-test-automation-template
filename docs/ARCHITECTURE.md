@@ -1,188 +1,284 @@
-# Architectural solution and adoption rationale
+# System Architecture and Engineering Decisions
 
-**Project:** QA Automation Platform  
-**Status:** Architecture recommendation grounded in the current repository  
-**Audience:** Engineering leads, QA engineers, and platform engineers
+**System:** QA Automation Platform  
+**Document type:** Current-state architecture and decision record  
+**Audience:** Principal and staff engineers, QA automation engineers, platform owners, and release engineering  
+**Status:** Describes the implementation on the default branch; recommendations and future-state guidance are identified separately
 
-## Recommendation
+## 1. Executive summary
 
-Adopt this project as a common harness for repeatable API, browser, and native mobile regression scenarios. Its strongest design choice is a clear division of responsibility: scenarios express expected behavior, domain objects perform application actions, and pytest fixtures manage execution resources. Reporting and CI provide a common way to run those scenarios and inspect the outcome.
+This repository is a Python test application that composes API, browser, and native mobile checks through pytest. It is executed as a command-line process on an engineer workstation or in a GitLab CI job. The process creates short-lived client contexts and sessions, invokes external application targets, evaluates assertions, and writes machine-readable and human-readable test evidence.
 
-This approach fits a team that releases an API and customer applications repeatedly and needs consistent evidence across those surfaces. It provides a practical foundation for expanding automation without building a separate execution framework for each platform.
+The platform deliberately shares orchestration and reporting conventions while keeping the interaction APIs specific to each surface:
 
-Adoption should begin with a small set of real product journeys and measured execution results. The repository currently demonstrates three API cases, three browser cases per selected engine, and one native mobile case. Those examples establish the implementation pattern; they do not establish coverage of a production product or prove a financial return.
+- Playwright's synchronous API request context drives the API examples.
+- Playwright pages and locators drive browser journeys.
+- Appium's WebDriver client, with UiAutomator2 or XCUITest capabilities, drives native mobile journeys.
+- Pytest fixtures control the lifecycle of those resources.
+- Allure metadata and attachments provide a common reporting vocabulary.
+- GitLab CI runs lint, API, and browser jobs by default, with mobile jobs enabled explicitly on prepared runners.
 
-## Why the team needs a shared approach
+The central architectural boundary is between **scenario intent**, **application interaction**, and **execution infrastructure**. Scenario code declares the expected behavior. Domain objects hold target-specific request paths, selectors, and actions. The platform package composes pytest options, fixtures, mobile capabilities, lifecycle, and diagnostics.
 
-As regression scenarios grow, the recurring cost extends beyond writing assertions. Engineers must also prepare sessions, select targets, manage credentials, close resources, reproduce failures, and provide evidence that another person can interpret. Repeating those responsibilities in individual scripts makes their behavior harder to maintain consistently.
+This is a starter automation harness with concrete examples, not a self-contained product-quality test platform. The checked-in examples target public demonstration services. The repository does not provision those targets, create isolated application data, manage devices, redact artifacts, synchronize cases with a test-management service, or calculate release-quality metrics. Teams adopting it must supply those operating capabilities and validate the signal against their own applications.
 
-A common harness addresses five concrete engineering needs:
+## 2. Scope, context, and system boundary
 
-- **Maintain application changes in a known place.** Request paths and UI locators live in domain objects. A locator change can be handled there while scenario assertions continue to describe the intended behavior.
-- **Make resource ownership explicit.** Fixtures create and close contexts and drivers. Scenario authors can reuse a supported lifecycle instead of implementing their own cleanup in every flow.
-- **Produce comparable failure evidence.** Shared reporting hooks attach case IDs, runtime metadata, and available failure screenshots. This gives engineers a consistent starting point for diagnosis.
-- **Select the right scope of feedback.** Markers, paths, and case IDs allow API, browser, and mobile checks to run independently. A developer can select a focused scenario, while CI can select broader coverage.
-- **Keep execution rules reviewable.** Browser engines, mobile prerequisites, artifact paths, and job stages are expressed in repository configuration and shared code.
+### 2.1 In scope
 
-These are mechanisms the implementation supplies. Reduced maintenance effort, faster diagnosis, and better release confidence are expected benefits to verify during adoption, rather than guarantees attached to the framework.
+The system owns:
 
-## Solution structure
+- Pytest discovery, marker-based selection, fixture composition, and process exit status.
+- Creation and cleanup of Playwright API contexts, browser contexts/pages, and Appium driver sessions.
+- Resolution of local browser and mobile runtime settings.
+- Optional local Appium server startup for an unreachable HTTP loopback endpoint.
+- Reusable domain interaction code for the included demo targets.
+- Allure case labels, environment metadata, and best-effort failure screenshots.
+- Local test entry points and the GitLab pipeline definition.
 
-The solution is a Python test application composed through pytest. It runs locally or inside CI jobs and communicates with external APIs, websites, and Appium servers. It does not require a separately deployed orchestration service.
+### 2.2 Outside the repository boundary
 
-```mermaid
-flowchart TB
-  engineer["Engineer or GitLab job"] --> pytest["pytest execution"]
-  pytest --> scenarios["tests: scenarios and expected results"]
-  pytest --> fixtures["platform fixtures: setup and cleanup"]
-  pytest --> reporting["reporting hooks"]
-  scenarios --> domains["domains: requests, locators, and actions"]
-  fixtures --> resources["API contexts, browser contexts, mobile sessions"]
-  domains --> resources
-  resources --> api["Product API"]
-  resources --> web["Browser application"]
-  resources --> appium["Appium host and native app"]
-  reporting --> results["Allure results and failure attachments"]
-  results --> report["Allure CLI HTML report"]
-```
+The following are external dependencies or responsibilities:
 
-### Scenarios own intent and outcomes
+- API and web target availability, test accounts, credentials, data reset, and target-side state.
+- Browser binaries, operating system images, network egress, and CI runner capacity.
+- Appium server operation, device or simulator provisioning, app signing, Android SDK, Xcode, and platform drivers.
+- Secret storage, artifact access policy, report retention beyond configured GitLab artifacts, and operational alerting.
+- Test-management synchronization, release policy, ownership routing, flaky-test governance, and suite-level service-level objectives.
 
-Files under `tests/<platform>/<domain>/` describe what a user or API consumer should be able to do and what result is expected. They own platform/domain markers, case IDs, assertions, and Allure steps.
+The test process has outbound trust relationships with API/web targets and the Appium endpoint. A remote Appium host additionally receives app paths and capabilities and controls a real or virtual device. Its network location is not inferred from the test target URL.
 
-For example, the [browser cart scenario](../tests/browser/shop/test_cart.py) signs in, adds a product, and verifies the displayed cart item. The test states the expected item name, while the browser domain classes hold selectors and navigation actions. The [API scenario](../tests/api/shop/test_products.py) similarly owns response assertions while `ProductsPage` owns the product request path.
+### 2.3 Current example coverage
 
-This boundary keeps the scenario readable during product review and gives implementation details an explicit maintenance location.
+The current suite defines seven case IDs when one browser engine is selected:
 
-### Domain objects own application interaction
+| Surface | Case IDs | Behavior | Implementation |
+|---|---|---|---|
+| API | TEST-01 through TEST-03 | Read three product records and assert status, ID, nonempty title, and approximate price | Playwright API request context and Fake Store API |
+| Browser | TEST-04 through TEST-06 | Sign in to SauceDemo, add one of three products, and verify the first cart item | Playwright page objects and browser fixtures |
+| Native mobile | TEST-07 | Add a catalog product and assert the cart displays one item | Appium WebDriver and Sauce Labs My Demo App |
 
-`src/domains/<platform>/<domain>/` contains small concrete objects:
+Selecting multiple browser engines repeats the three browser cases per engine. These are demonstration examples. They do not imply production application coverage, cross-device compatibility, performance testing, or a validated release gate.
 
-- [`ProductsPage`](../src/domains/api/shop/products_page.py) owns the API base URL and product request methods.
-- [`LoginPage`](../src/domains/browser/shop/login_page.py), [`InventoryPage`](../src/domains/browser/shop/inventory_page.py), and [`CartPage`](../src/domains/browser/shop/cart_page.py) own browser navigation, login actions, and locators.
-- [`ShopPage`](../src/domains/mobile/shop/shop_page.py) owns native app locators, cart actions, and explicit waits, with Android and iOS locator choices.
+## 3. Architectural decomposition
 
-Here, `domains` names application-specific automation code. It does not imply a business domain model or a common abstraction across API, browser, and native UI protocols. These objects receive an existing request context, page, or driver and operate through that library's API.
+### 3.1 Runtime composition
 
-### Platform fixtures own lifecycle
+The repository is organized as four cooperating code areas:
 
-[`tests/conftest.py`](../tests/conftest.py) loads [`platform_plugin.py`](../src/platform/platform_plugin.py), which registers the reporting plugin and provides shared execution behavior.
+| Area | Location | Responsibility |
+|---|---|---|
+| Scenario suite | tests/ | Express user/API behavior, apply markers and case IDs, make assertions, and attach scenario-specific context |
+| Target adapters | src/domains/ | Encapsulate target URLs, endpoint paths, selectors, UI actions, and platform-specific waits |
+| Execution platform | src/platform/ | Configure pytest defaults, construct capabilities, create/close resources, and register reporting hooks |
+| Tooling and delivery | Repository root | Pin dependencies, define pytest/Ruff settings, provide the shell wrapper and Allure CLI commands, and describe GitLab jobs |
 
-API request contexts, browser contexts/pages, and mobile driver sessions have function scope. Their lifecycle is managed by fixtures. Mobile settings, capabilities, and the Appium server fixture have session scope and are requested when needed. Browser context cleanup is delegated through pytest-playwright's context factory.
+The tests directory loads platform_plugin through tests/conftest.py. The platform plugin declares reporting_plugin as a pytest plugin, so fixtures and hooks are registered as part of test startup. Pytest's configured import roots are src and src/platform; documented commands assume execution from the repository root.
 
-Appium ownership is particularly useful for local and CI parity. The fixture reuses a ready server, or starts an unreachable local HTTP loopback server when the Appium executable is available. It stops only a process it created. Remote servers, device provisioning, and platform tooling remain the responsibility of the Appium host.
+The architecture is an in-process composition, not a separately deployed service. There is no central control plane, queue, persistent database, API server, or remote test scheduler in this repository. GitLab and its runners provide job scheduling; pytest remains the test process and execution authority.
 
-Fresh contexts and sessions reduce shared client state between scenarios. They do not reset remote application data or guarantee an empty device/app state; scenario data and native app reset behavior require explicit ownership.
+### 3.2 Scenario and domain boundary
 
-## Why these technology choices fit
+Scenario modules under tests/<surface>/<domain>/ own the behavior contract and the final assertions. They also own pytest markers, Allure steps, and test-case IDs. Parametrized examples attach the test_case marker to each pytest parameter so that each generated case can be selected independently.
 
-### Pytest provides the composition mechanism
+Domain objects under src/domains/<surface>/<domain>/ accept an already-created Playwright context, page, or Appium driver. They do not create sessions and do not own resource teardown. Their current responsibilities are intentionally concrete:
 
-Pytest already supplies discovery, parametrization, markers, fixtures, hooks, and exit status. Using those capabilities directly gives the project one lifecycle model across all three platforms. Teams can extend a fixture or add a scenario using the same mechanism as the existing code.
+- ProductsPage holds the Fake Store API base URL and the GET /products/{id} request.
+- LoginPage holds the SauceDemo base URL, login selectors, credential resolution, and navigation to InventoryPage.
+- InventoryPage and CartPage hold SauceDemo selectors and actions for product and cart flows.
+- ShopPage holds My Demo App Android resource IDs, iOS accessibility IDs, explicit waits, and cart interactions.
 
-A custom runner would introduce another layer of selection, execution, cleanup, and error propagation to maintain. The current project has no demonstrated need for that additional layer.
+The package name domains is an organizational convention for target-specific automation code. It does not represent a business-domain model, a shared cross-platform abstraction, or a claim that API, browser, and native interactions have interchangeable semantics. Platform differences remain explicit in code.
 
-### Playwright covers API and browser interaction
+This division allows a selector or endpoint change to be made in an adapter while leaving a stable behavioral assertion intact. It does not guarantee that every application change can be isolated to one file: when target behavior or data contracts change, scenario expectations must change with the adapter.
 
-The implementation uses Playwright's synchronous request context for HTTP scenarios and its browser APIs for web journeys. This shares one Python dependency across those two interaction types and lets browser scenarios use Playwright's locator and waiting behavior directly.
+### 3.3 Execution platform
 
-The cost is a shared dependency lifecycle: API and browser automation both depend on the pinned Playwright package. Browser execution also depends on matching browser binaries and CI images. For the current small request layer, this is a coherent choice. A separate HTTP library would be justified only by concrete requirements that the existing request API does not meet.
+The execution platform is implemented by platform_plugin.py, config/settings.py, mobile/options.py, and reporting_plugin.py.
 
-### Appium preserves native platform support
+The platform plugin:
 
-Native Android and iOS interaction uses Appium and the appropriate driver: UiAutomator2 or XCUITest. The pytest process can connect to a local or remote Appium host, allowing mobile platform tools to live on a suitable machine.
+- Reads environment-backed defaults for browser engine, headed mode, tracing, and video unless those options were already supplied through pytest configuration, PYTEST_ADDOPTS, or command-line arguments.
+- Resolves browser emulation from the explicit --device option or BROWSER_PROFILE.
+- Provides an API request context with an Accept: application/json header and disposes it after the test.
+- Wraps Playwright's context factory to optionally record a per-test HAR.
+- Loads immutable mobile settings once per pytest session.
+- Builds Android or iOS Appium capabilities only when mobile fixtures are requested.
+- Reuses a ready Appium server, or starts and owns a local process when narrowly permitted by the endpoint policy.
+- Creates a function-scoped driver and calls quit() during fixture teardown.
 
-Browser automation and native automation retain their own APIs and locator strategies. This makes platform differences visible where they must be maintained. Sharing a scenario structure does not require pretending that a browser page and a native app have identical interaction semantics.
+The reporting plugin adds Allure IDs and tags from test_case markers, maps platform markers to Allure features, adds mobile platform/device parameters, and writes an environment.properties file when Allure output is enabled. It captures a screenshot for setup or call failures when a browser page or mobile driver is available. Screenshot capture is bounded and best-effort; a diagnostic failure is attached as text and must not replace the underlying test failure.
 
-### Domain classes retain target configuration
+## 4. Resource lifecycle and execution semantics
 
-API and browser target URLs are reviewed source constants: `ProductsPage.BASE_URL` and `LoginPage.BASE_URL`. Request paths, locators, and target identity therefore remain close to each other. Runtime settings such as browser engine, recording options, mobile device, and Appium endpoint come from pytest options or the environment. Credentials are supplied explicitly or through environment variables.
+### 4.1 Scope model
 
-This boundary follows the project's current configuration choice. It means changing the API or browser host requires a code change. Running an unchanged checkout against several deployment URLs through environment variables is not supported by this design. If that becomes a requirement, revisit target selection as an explicit architecture change while preserving the domain objects' responsibility for paths and actions.
+Fixture scope defines client-resource reuse. It is not a mechanism for resetting application state.
 
-### Shared reporting makes results easier to inspect
+| Resource | Scope | Creation and cleanup |
+|---|---|---|
+| Settings | Session | Read once from environment by Settings.from_env() |
+| Browser device selection | Session | Resolve explicit device or profile using Playwright's device registry |
+| Mobile capabilities | Session | Validate platform and app path, then construct UiAutomator2Options or XCUITestOptions |
+| Appium server | Session, requested only by mobile tests | Reuse ready endpoint; if locally launched, stop only the process owned by this run |
+| APIRequestContext | Function | Create per test with JSON Accept header; dispose in finally |
+| Browser context/page | Function | Use pytest-playwright fixtures/context factory; optional HAR is attached to context creation |
+| Appium WebDriver | Function | Create remote session against configured server; call quit() in finally |
 
-[`reporting_plugin.py`](../src/platform/reporting_plugin.py) adds Allure IDs/tags, platform features, mobile parameters, and runtime versions. On setup or call failure, it attempts a screenshot when a browser page or mobile driver is available. Capture uses a bounded timeout, and a capture error preserves the original test failure.
+A fresh API request context or browser context limits client-side cookie and storage reuse. A fresh Appium session does not guarantee that the installed application, device, backend account, or remote cart has been reset. Test data isolation and device-state reset need explicit implementation if the selected application retains mutable state across sessions.
 
-Allure results remain separate from report rendering. Pytest writes results; the Node.js Allure CLI generates or displays an HTML report. API and browser pytest execution does not require the report renderer to be running.
+### 4.2 Local and remote Appium behavior
 
-Case IDs support selection and traceability inside the repository, but uniqueness remains a review convention. There is no implemented integration that synchronizes those IDs with an external test-management system.
+The configured APPIUM_SERVER_URL defaults to http://127.0.0.1:4723. Before session creation, the fixture requests the endpoint's /status path with a two-second timeout and requires value.ready to be true.
 
-## Execution and scaling model
+If the endpoint is unreachable, automatic startup is allowed only when the URL is plain HTTP and its host is localhost or a loopback IP. The plugin locates the appium executable, starts it with the requested host, port, and optional base path, writes output to reports/appium.log, and polls for readiness for up to 30 seconds. The fixture terminates only the process group it started, escalating from SIGTERM to SIGKILL if required.
 
-[`run_tests.sh`](../run_tests.sh) provides a local entry point that loads `.env`, selects the interpreter, combines marker filters, and writes results for a selected tag. Direct pytest remains available for explicit commands and CI.
+An HTTP error, malformed response, or unready response is a setup error; the fixture does not interpret these as permission to start a second service. An unreachable remote or HTTPS endpoint is also a setup error and must be started externally. App installation paths and download URLs are resolved from the Appium host's perspective, not necessarily the pytest host's.
 
-The current GitLab configuration uses three stages:
+### 4.3 End-to-end execution path
 
-```mermaid
-flowchart LR
-  lint["lint: Ruff"] --> api["test: API on Python 3.12"]
-  lint --> browser["test: Chromium, Firefox, WebKit"]
-  api --> mobile["mobile stage"]
-  browser --> mobile
-  mobile --> android["Android when enabled"]
-  mobile --> ios["iOS when enabled"]
-```
+A normal run follows this sequence:
 
-The API job uses a configurable Python-version matrix whose current list contains only 3.12. The browser job creates separate jobs for Chromium, Firefox, and WebKit using the pinned Playwright image. These jobs can execute concurrently when runners are available. Browser Python versions come from that image; the configuration does not create a Python-by-browser cross-product.
+1. The engineer or CI job invokes pytest directly or through run_tests.sh.
+2. The wrapper changes to the repository root, sources .env as shell code when present, selects an interpreter, translates an optional case tag into a pytest marker, and chooses a tag-specific Allure results directory.
+3. Pytest loads tests/conftest.py and the platform plugin. Plugin configuration applies environment defaults only when a corresponding option was not already provided.
+4. Pytest collects tests and applies path, marker, case-ID, keyword, and browser-engine filters.
+5. A selected test requests its fixtures. Pytest creates only the API, browser, or mobile resources that the test needs.
+6. The scenario invokes its target-specific domain object. The object performs requests or UI actions through the fixture-owned resource.
+7. The scenario asserts the outcome. Allure receives labels, steps, and any explicit test attachments.
+8. On setup or call failure, the reporting hook attempts a screenshot if the corresponding UI resource exists and Allure output is enabled.
+9. Pytest tears down function-scoped resources, then returns its exit status. The wrapper propagates that status.
+10. A separate Allure CLI command can aggregate raw result files into an HTML report or serve a live view.
 
-This provides an initial scaling boundary at the job level, with separate workspaces and artifacts. Pytest does not currently use xdist workers or configured retries. Additional parallelism should follow evidence of a feedback-time bottleneck and available isolated targets.
+### 4.4 Selection and case identity
 
-Mobile capacity depends on devices, Appium endpoints, and runner availability. Android and iOS jobs are opt-in, and the repository has no device lock across pipelines. Assign distinct devices or serialize access through runner scheduling before increasing mobile concurrency.
+The wrapper accepts either all or a tag matching the shell pattern for an alphanumeric identifier beginning with a letter. A non-all tag becomes a test_case(id='…') marker expression. When a caller also supplies -m or --markexpr, the wrapper combines the expressions with logical AND. Other arguments are passed through to pytest.
 
-Independent runs must also isolate mutable application data and output files. Browser/API contexts do not provide backend data isolation. Local runs sharing a checkout can overwrite result directories, HAR files, or the Appium log; separate workspaces and result paths are the safer operating model for concurrent local execution.
+Case IDs are used for wrapper selection and Allure traceability. The current repository does not enforce uniqueness at collection time and does not synchronize the IDs with another system. Unique IDs are a repository review convention. Case IDs do not replace pytest node IDs, pytest keywords, or platform markers.
 
-## Operational responsibilities
+## 5. Architecture decisions and consequences
 
-The architecture can centralize test execution rules, but adoption still requires named owners for its external dependencies:
+### 5.1 Pytest is the execution composition layer
 
-- **Product engineers and QA engineers** own scenario relevance, expected results, domain actions, selectors, and disposable test data.
-- **Automation maintainers** own shared fixtures, reporting behavior, dependency alignment, case-ID conventions, and the runnable documentation.
-- **Platform or runner owners** provide CI capacity, Appium services, mobile drivers, SDK/Xcode, device preparation, and network access.
-- **The team owning the release process** decides which selections block a release and who responds when a gate fails.
+**Decision:** Use pytest discovery, fixtures, hooks, markers, and parametrization as the common execution model.
 
-Credentials belong in ignored local configuration or protected CI variables. Reports and recordings may contain page content, cookies, or test data and need controlled access and retention. The current GitLab jobs retain artifacts for seven days. They publish individual results and reports; a combined Allure report and persistent CI history are not implemented.
+**Rationale:** These primitives already support the required lifecycle and case selection across API, browser, and mobile tests. A custom runner would duplicate collection, filtering, setup/teardown, error reporting, and exit-code semantics without a demonstrated requirement.
 
-Mobile environments must match the app build. An iOS simulator requires a simulator build; the current iOS CI IPA targets a physical device and needs the corresponding device/signing preparation. These prerequisites affect whether a mobile failure represents a product defect or an environment problem.
+**Consequence:** Contributors need working knowledge of pytest fixture resolution, plugin loading, marker behavior, and hook ordering. Cross-cutting behavior belongs in fixtures or hooks rather than handwritten per-test setup.
 
-## Why use this project instead of separate scripts
+### 5.2 Playwright is shared by HTTP and browser scenarios
 
-Separate scripts can be suitable for a one-off probe. Their maintenance cost grows when many scenarios independently implement login, session ownership, result paths, and diagnostics. This project gives those shared responsibilities a common implementation while leaving the scenario and application interaction code concrete.
+**Decision:** Use Playwright's Python client for API request contexts and browser interactions.
 
-A universal custom framework would move in the other direction: it would add interfaces, adapters, and orchestration that the current examples do not require. The present design uses pytest, Playwright, and Appium directly and concentrates custom code on the project's actual needs.
+**Rationale:** The current API layer is a small read-only wrapper, and the same pinned dependency supports browser locator and wait behavior. The split between request context and browser page is explicit, while dependency and version management remain consolidated.
 
-Manual exploratory checks remain valuable for unfamiliar behavior and new product changes. This harness is useful for known, repeatable expectations that the team needs to check consistently across releases. Its adoption case is strongest when the same critical journeys recur often enough that repeatable execution and reusable diagnostics justify maintaining them.
+**Consequence:** API tests inherit Playwright request behavior and dependency lifecycle. They do not require browser launch, but the package is still installed. If API requirements grow to need capabilities that are poorly served by this client, introduce another HTTP client only with a documented need and a clear policy for timeouts, authentication, retries, and reporting.
 
-## Adoption plan and decision criteria
+### 5.3 Appium is used for native application coverage
 
-### Establish a product pilot
+**Decision:** Use Appium WebDriver with UiAutomator2 on Android and XCUITest on iOS.
 
-Choose a small set of important API expectations and customer journeys. Adapt the existing domain classes and assertions to real test environments. Assign scenario owners, provide disposable accounts/data, and confirm that a new engineer can run the selected scenarios using the documented setup.
+**Rationale:** These drivers expose native application controls and can run on platform-capable hosts separate from the pytest process.
 
-During the pilot, distinguish assertion failures from target availability, configuration, and infrastructure failures. Confirm cleanup behavior and the usefulness of generated evidence before treating the suite as a release gate.
+**Consequence:** Native execution depends on separately provisioned servers, drivers, SDKs, simulators/devices, app builds, and platform-specific identifiers. Sharing pytest selection and reporting does not make mobile infrastructure equivalent to browser infrastructure.
 
-### Expand execution coverage deliberately
+### 5.4 Domain targets are source-controlled constants
 
-Run the selected browser journeys across the required engine matrix. Enable mobile only after devices, Appium endpoints, app builds, and runner ownership are ready. Choose the runtime list based on the team's support requirements and compatible dependencies.
+**Decision:** Keep the API and browser base URLs in ProductsPage.BASE_URL and LoginPage.BASE_URL. Keep runtime browser and mobile execution options in pytest/environment configuration.
 
-Promote stable, relevant selections into required CI gates. A failed job should have an owner and a clear response path. Adding blanket retries would obscure the distinction between a stable signal and an intermittent one; the existing configuration leaves failures visible.
+**Rationale:** The target-specific paths and selectors remain adjacent to the interaction methods that use them, while device and recording settings can vary by run.
 
-### Measure whether adoption is worthwhile
+**Consequence:** Switching API or browser deployment targets currently requires a source change. The architecture does not yet provide a validated environment-target matrix, configuration schema, or protection against accidentally targeting production. If deployment selection becomes dynamic, add a typed and validated target configuration and a safe environment policy rather than scattering raw URL variables through tests.
 
-Use a baseline and an agreed observation period to assess these outcomes:
+### 5.5 Allure stores evidence separately from test execution
 
-- **Feedback time:** elapsed time from requesting a selection to receiving its result, including CI queue time.
-- **Failure investigation time:** time needed to identify a failed run's cause and responsible owner.
-- **Repeatability:** unexplained pass/fail changes for the same revision, inputs, and controlled target state.
-- **Maintenance effort:** effort to update the affected scenarios after a known API or UI change.
-- **Critical journey coverage:** the agreed release expectations represented by maintained scenarios, with named owners.
+**Decision:** Pytest writes raw Allure results; the Node.js Allure CLI generates or serves a report independently.
 
-These are proposed adoption measures. The repository produces case outcomes, timings, artifacts, and CI job results, but does not calculate all these measures or supply an organizational metrics dashboard. Agree success thresholds with the pilot owners instead of assuming a universal percentage or speedup.
+**Rationale:** Test execution can run without an HTML renderer, while developers can inspect results after the process finishes or use a watch command during execution.
 
-Continue expanding the harness when it delivers a useful, repeatable signal at an acceptable maintenance cost. If failures remain dominated by shared data, unreliable demo environments, or device contention, resolve those operating conditions before expanding the scenario count.
+**Consequence:** The report must be generated from the intended result directories. Existing result directories can contribute old results, and the wrapper clears the directory associated with its current tag. CI currently uploads per-job artifacts; it does not merge results or preserve an integrated Allure history.
 
-## Implementation evidence and scope of this recommendation
+## 6. Quality attributes and trade-offs
 
-This proposal is grounded in the checked-in [scenario suites](../tests/), [domain objects](../src/domains/), [pytest plugin](../src/platform/platform_plugin.py), [reporting plugin](../src/platform/reporting_plugin.py), [mobile options](../src/platform/mobile/options.py), [pytest configuration](../pytest.ini), [GitLab pipeline](../.gitlab-ci.yml), and [Allure configuration](../allurerc.json).
+### 6.1 Modifiability
 
-The architecture was reviewed from source and configuration. This document does not claim a successful execution of every browser/device combination, a validated live GitLab pipeline, or measured savings. Use the [technical guide](README.md) for setup and operational commands, and collect pilot evidence before making those claims.
+The tests/domain/platform separation gives maintainers predictable edit locations. A selector change belongs in a page object; a new scenario belongs in tests; resource ownership belongs in fixtures. This is a useful starting point for small-to-medium suites.
+
+The current adapters remain target-specific, which avoids premature generalized abstractions. As the suite grows, common authentication or data setup may justify separate reusable services, but those should follow repeated behavior rather than anticipate it.
+
+### 6.2 Repeatability and isolation
+
+Function-scoped contexts and sessions reduce state leakage in the automation client. They do not isolate server-side data, users, rate limits, devices, or external demo-service behavior. The API examples assert fixed prices on a public demo API; upstream data changes can produce failures unrelated to a code regression.
+
+For release use, provide controlled test targets, disposable identities, stable test data, explicit reset semantics, and unique resource namespaces where concurrent runs can overlap. Retries are not configured; this preserves the first observed failure but may expose environmental noise.
+
+### 6.3 Observability and diagnosability
+
+The implementation emits Allure IDs/tags, platform features, environment versions, optional HAR, Playwright trace/video, JUnit XML and HTML reports in CI, explicit API response summaries, and best-effort screenshots on UI failure. These artifacts support investigation but can include sensitive content and are not redacted by the reporting plugin.
+
+There is no application-level structured logger, automatic failure classification, integrated CI-to-Allure aggregation job, persistent trend store, or external test-management link. Those are operational extensions, not current capabilities.
+
+### 6.4 Scalability and throughput
+
+The pipeline scales first at the CI job level: API and browser jobs occupy the test stage, and the browser matrix creates separate engine-specific jobs. Actual concurrency depends on runner capacity. Pytest xdist, automatic retries, distributed queues, device locking, and test sharding are not configured.
+
+Mobile parallelism is constrained by physical devices, Appium endpoints, runner availability, and target state. Before increasing concurrency, allocate a distinct device and endpoint per job or serialize jobs; a shared checkout can also create collisions in reports, HAR files, and reports/appium.log.
+
+### 6.5 Portability
+
+Python and browser tests run in Linux CI images. The shell wrapper assumes Bash-compatible behavior. Automatic local Appium process ownership uses POSIX process groups. Android and iOS execution depend on appropriate host platforms and tooling; iOS driver operation requires macOS/Xcode. Windows support is not established by the checked-in pipeline.
+
+### 6.6 Security and privacy
+
+Local credentials belong in ignored .env files; CI credentials belong in protected CI/CD variables. The example environment file contains no browser credentials. Appium endpoints should be trusted and secured by the host/network configuration. The fixture restricts automatic server startup to HTTP loopback but does not configure TLS, authentication, or an Appium server allowlist.
+
+Screenshots, HAR files, video, traces, HTML reports, pytest output, and Appium logs can expose application content, cookies, request metadata, or test data. Apply access controls and retention limits to artifacts; use disposable identities and non-sensitive test data. The GitLab pipeline currently sets a seven-day artifact expiration.
+
+## 7. Delivery topology and CI behavior
+
+The GitLab pipeline defines lint, test, and mobile stages. Ruff runs in a Python 3.12 slim image. API tests run with a Python version matrix containing only 3.12. Browser tests run in the Playwright Python v1.64.0 Noble image, with separate Chromium, Firefox, and WebKit jobs. Android and iOS jobs are skipped unless RUN_ANDROID=true or RUN_IOS=true and require runners tagged android or macos.
+
+The API and browser jobs can run concurrently when runner capacity is available. Mobile jobs run in the later mobile stage after the test stage. The current configuration installs Python dependencies but does not provision mobile SDKs, devices, Appium, or drivers. Those are runner-owner responsibilities.
+
+Each test job requests JUnit XML, a self-contained pytest-html report, Allure results, and applicable Playwright/mobile output. GitLab uploads reports even when the job fails and retains artifacts for seven days. There is no merge step that creates one cross-job Allure report.
+
+The iOS job's configured app is a physical-device IPA. It cannot be used as an iOS Simulator build. A simulator topology requires a simulator-compatible app build and an appropriate macOS runner/device configuration. App signing, device registration, and target availability are outside this repository.
+
+## 8. Operational ownership
+
+| Responsibility | Primary owner | Required operating decision |
+|---|---|---|
+| Scenario correctness and coverage | Product engineers and QA | Which behaviors are release-critical, how expectations evolve, and who maintains each case |
+| Domain adapters | Automation maintainers | How URLs, request paths, selectors, and platform identifiers are updated |
+| Fixtures and reporting | Automation/platform maintainers | How lifecycle, diagnostics, output paths, and dependencies remain compatible |
+| CI execution | CI platform owners | Runner capacity, network access, protected variables, artifact policy, and required job rules |
+| Mobile infrastructure | Mobile platform owners | Devices, Appium endpoints, app build distribution, SDK/Xcode and driver lifecycle |
+| Release gating | Release owner | Which cases block promotion, failure ownership, and incident response |
+
+The repository does not currently encode this responsibility model in CODEOWNERS or enforce case ownership. Teams should assign these roles before treating the suite as an operational gate.
+
+## 9. Adoption and evolution guidance
+
+### 9.1 Pilot against a controlled target
+
+Start with a narrow set of business-critical API expectations and customer journeys. Replace the public demo targets with controlled non-production targets, supply disposable accounts and deterministic data, and record baseline execution and diagnosis times. Have a new team member follow the documented setup without undocumented access.
+
+### 9.2 Stabilize the execution contract
+
+Define the required Python and Playwright versions, CI images, browser engines, test environment, credentials, and artifact policy. For mobile, qualify the server/driver/device/app build combination before enabling the job. Confirm that teardown leaves devices and target data in an acceptable state.
+
+### 9.3 Promote evidence-backed gates
+
+Only make a selection required after its target data, ownership, failure response, and runner reliability are understood. Track feedback latency, failure diagnosis time, repeatability on the same revision, maintenance cost, and critical journey coverage. The repository can emit some underlying timings and outcomes, but it does not calculate these organizational measures.
+
+### 9.4 Evolve through explicit decisions
+
+Potential future changes include dynamic target configuration, isolated data provisioning, suite sharding, device locks, artifact redaction, result aggregation, test-management synchronization, and structured failure classification. Each should be introduced in response to an observed operational requirement, with ownership and security impact documented.
+
+Avoid adding a universal abstraction that hides the differences between HTTP, browser, and native UI behavior. Prefer small adapters and explicit lifecycle changes that can be verified against the actual targets.
+
+## 10. Evidence, limitations, and related documentation
+
+This document describes the checked-in implementation in the current source, tests, pytest configuration, dependency pins, Allure configuration, shell wrapper, and GitLab pipeline. It is not a report of successful execution on every browser engine, mobile operating system, or external target. It makes no claim of measured cost reduction, production coverage, or release readiness.
+
+Use the [Technical Guide](README.md) for installation, test selection, configuration, reporting, CI operations, and scenario development. The [root README](../README.md) is the quick-start entry point.
