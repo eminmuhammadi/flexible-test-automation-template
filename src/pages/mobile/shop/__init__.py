@@ -1,0 +1,1 @@
+"""Mobile shop page objects."""

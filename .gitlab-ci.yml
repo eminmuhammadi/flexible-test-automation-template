@@ -1,0 +1,134 @@
+stages:
+  - lint
+  - test
+  - mobile
+  - report
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  RUN_ANDROID: "false"
+  RUN_IOS: "false"
+  PLAYWRIGHT_TRACING: "on"
+  PLAYWRIGHT_VIDEO: "on"
+  PLAYWRIGHT_HAR: "on"
+  PLAYWRIGHT_HEADED: "off"
+  BROWSER_PROFILE: "desktop"
+  PLAYWRIGHT_BROWSER: "chromium"
+  PLAYWRIGHT_HAR_DIR: "reports/playwright/har"
+
+cache:
+  key: "$CI_JOB_NAME"
+  paths:
+    - .cache/pip
+
+lint:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install -r requirements.txt
+  script:
+    - python -m ruff check src tests
+
+api:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install -r requirements.txt
+    - mkdir -p reports
+  script:
+    - python -m pytest tests/api/shop -m api --alluredir=reports/api/allure-results --clean-alluredir --html=reports/api.html --self-contained-html --junitxml=reports/api.xml
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/api.xml
+    paths:
+      - reports/
+
+browser:
+  stage: test
+  image: mcr.microsoft.com/playwright/python:v1.64.0-noble
+  before_script:
+    - python -m pip install -r requirements.txt
+    - mkdir -p reports
+  script:
+    - python -m pytest tests/browser/shop -m browser --alluredir=reports/browser/allure-results --clean-alluredir --output=reports/playwright --html=reports/browser.html --self-contained-html --junitxml=reports/browser.xml
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/browser.xml
+    paths:
+      - reports/
+
+android:
+  stage: mobile
+  tags:
+    - android
+  variables:
+    MOBILE_PLATFORM: Android
+    MOBILE_APP_PATH: https://github.com/saucelabs/my-demo-app-android/releases/download/2.3.0/mda-2.3.0-27.apk
+  rules:
+    - if: '$RUN_ANDROID == "true"'
+    - when: never
+  before_script:
+    - python3 -m venv .venv
+    - .venv/bin/python -m pip install -r requirements.txt
+    - mkdir -p reports
+  script:
+    - .venv/bin/python -m pytest tests/mobile/shop -m mobile --alluredir=reports/android/allure-results --clean-alluredir --html=reports/android.html --self-contained-html --junitxml=reports/android.xml
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/android.xml
+    paths:
+      - reports/
+
+ios:
+  stage: mobile
+  tags:
+    - macos
+  variables:
+    MOBILE_PLATFORM: iOS
+    MOBILE_APP_PATH: https://github.com/saucelabs/my-demo-app-ios/releases/download/2.3.0/SauceLabs-Demo-App.ipa
+  rules:
+    - if: '$RUN_IOS == "true"'
+    - when: never
+  before_script:
+    - python3 -m venv .venv
+    - .venv/bin/python -m pip install -r requirements.txt
+    - mkdir -p reports
+  script:
+    - .venv/bin/python -m pytest tests/mobile/shop -m mobile --alluredir=reports/ios/allure-results --clean-alluredir --html=reports/ios.html --self-contained-html --junitxml=reports/ios.xml
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/ios.xml
+    paths:
+      - reports/
+
+allure-report:
+  stage: report
+  image: node:22-bookworm-slim
+  needs:
+    - job: api
+      artifacts: true
+    - job: browser
+      artifacts: true
+    - job: android
+      artifacts: true
+      optional: true
+    - job: ios
+      artifacts: true
+      optional: true
+  when: always
+  script:
+    - npm ci
+    - npx allure generate reports/*/allure-results --output reports/allure-report --clean
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - reports/allure-report/

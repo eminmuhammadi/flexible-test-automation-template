@@ -1,0 +1,1 @@
+"""Shop browser page objects."""

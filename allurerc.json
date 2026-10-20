@@ -1,0 +1,11 @@
+{
+  "name": "QA Automation Platform",
+  "plugins": {
+    "awesome": {
+      "options": {
+        "singleFile": true,
+        "reportLanguage": "en"
+      }
+    }
+  }
+}
