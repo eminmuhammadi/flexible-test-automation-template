@@ -2,6 +2,8 @@
 
 A compact pytest project for API, browser, Android, and iOS automation. It uses Playwright for both HTTP requests and browser automation, and Appium for native mobile apps. Test cases are pytest methods grouped in suites; page classes own UI locators and actions.
 
+The full implementation-aligned architecture, execution, configuration, development, and operations guide is in [docs/README.md](docs/README.md).
+
 ## Project layout
 
 ```text
@@ -75,7 +77,7 @@ Open the local address printed by the watcher. It discovers new result directori
 
 Test titles identify the product and browser or mobile platform. Reports include API, Browser, and Mobile features, mobile platform/device parameters, runtime versions, API status summaries, and screenshots for browser/mobile failures during setup or test execution when a driver is available. Screenshot capture errors appear as diagnostic attachments and preserve the original failure. Full API bodies, credentials, and environment variables are not automatically copied into report metadata; screenshots and existing pytest output can still contain sensitive test data.
 
-Static reports keep the latest 30 launches in `reports/allure-history.jsonl` for history and trend charts. Rebuilding a report adds a history entry; run one static generator at a time and retain the history file between runs. GitLab caches it per branch and serializes report generation for that branch; history availability depends on the runner's cache storage.
+Allure configuration sets the history path to `reports/allure-history.jsonl` and the history limit to 30. This is local CLI configuration; the current GitLab pipeline does not generate a combined Allure report or preserve this history.
 
 ## Lint
 
@@ -83,10 +85,9 @@ Ruff checks Python style, common errors, and import order. Run it before committ
 
 ```sh
 python -m ruff check src tests
-python -m pytest tests/reporting -q
 ```
 
-Lint and the reporting regression check run in separate GitLab CI jobs. The reporting check uses local fake drivers and needs no external services or devices.
+The repository has no dedicated reporting test suite. The GitLab YAML defines a Ruff lint job, but does not define a reporting regression job.
 
 ## Run tests
 
@@ -166,4 +167,4 @@ Set `PLAYWRIGHT_HEADED=on` in `.env` to see the browser while tests run, or use 
 
 ## GitLab CI
 
-The API and browser jobs run by default and publish JUnit, HTML, and Playwright artifacts. A final CI job combines their Allure results, plus any enabled mobile results, into `reports/allure-report/` as a downloadable single-file HTML artifact retained for 30 days. Android and iOS jobs are opt-in with `RUN_ANDROID=true` and `RUN_IOS=true`; configure matching `android` and `macos` runner tags and provide a device. The mobile fixture starts Appium locally if needed, or reuses a ready server. iOS requires macOS, Xcode, and a physical device because the supplied IPA is not simulator-compatible. The mobile jobs install the corresponding My Demo App build from its release URL.
+The YAML declares stages `lint`, `api`, `browser`, `ios`, and `android`, but API/browser jobs use `stage: test` and mobile jobs use `stage: mobile`; those names are not declared. GitLab normally rejects undeclared job stages, so validate or correct this mismatch before relying on the pipeline. The API and browser jobs request JUnit, HTML, and Playwright artifacts; Android and iOS jobs are gated by `RUN_ANDROID=true` and `RUN_IOS=true` and use `android` and `macos` runner tags. No Allure aggregation job is present. The mobile fixture may start a local Appium server or reuse a ready one. The iOS CI app URL points to an `.ipa`, which is not the simulator build.

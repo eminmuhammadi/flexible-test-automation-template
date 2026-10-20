@@ -19,19 +19,19 @@ class TestCart:
                 "backpack",
                 "Sauce Labs Backpack",
                 marks=pytest.mark.test_case(id="TEST-04"),
-                id="backpack",
+                id="TEST-04",
             ),
             pytest.param(
                 "bike-light",
                 "Sauce Labs Bike Light",
                 marks=pytest.mark.test_case(id="TEST-05"),
-                id="bike-light",
+                id="TEST-05",
             ),
             pytest.param(
                 "bolt-t-shirt",
                 "Sauce Labs Bolt T-Shirt",
                 marks=pytest.mark.test_case(id="TEST-06"),
-                id="bolt-t-shirt",
+                id="TEST-06",
             ),
         ],
     )
