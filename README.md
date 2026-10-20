@@ -28,7 +28,7 @@ API tests use Playwright's `APIRequestContext`. Browser and mobile tests use pag
 
 ## Install and configure
 
-Requirements: Python 3.12 or newer. Mobile runs also need Node.js, Appium, and an Android emulator/device or a macOS iOS device runner with Xcode.
+Requirements: Python 3.12 or newer. Node.js/npm is required to run the pinned Allure CLI (`allure` 3.21.0), but this project does not declare a minimum Node.js version. Running Appium locally also requires Node.js/npm and Appium; tests connecting to a ready remote Appium server do not need those locally. iOS runs require macOS/Xcode on the Appium host, which may be separate from the pytest runner.
 
 ```sh
 python3 -m venv .venv
@@ -39,7 +39,7 @@ cp .env.example .env
 set -a && source .env && set +a
 ```
 
-Node.js 22 or newer is needed to build and view the Allure report. The report CLI is pinned in `package-lock.json`:
+Node.js/npm is needed to run the Allure CLI. The project pins CLI version 3.21.0 but does not declare a minimum Node.js version:
 
 ```sh
 npm ci
@@ -106,6 +106,49 @@ The script loads `.env` automatically when present. Copy `.env.example` to `.env
 
 Browser actions run without an added delay by default. Pass `--slowmo=1000` when you want a visible one-second pause per action. Select a single case with `-m "test_case(id='TEST-01')"`; use `-m api` for API cases or `-m regression` for regression cases.
 
+## Add a browser or mobile test
+
+Record the user flow and useful locators, then fit them into the existing pytest and page-object structure. Generated code is a starting point; keep the project's fixtures and test conventions.
+
+### Browser: Playwright Codegen
+
+With the virtual environment active and `.env` loaded, record against the configured site:
+
+```sh
+playwright codegen --target=python-pytest "$WEB_BASE_URL"
+```
+
+Use the browser window to perform the flow. In Playwright Inspector, add assertions or pick locators, then copy the generated Python. See the [Playwright Codegen guide](https://playwright.dev/python/docs/codegen).
+
+Create the test under `tests/browser/<domain>/test_<flow>.py`. Use the existing `page` fixture and move reusable locators and actions into `src/pages/browser/<domain>/`. Keep outcome assertions in the test with Playwright `expect`, following `tests/browser/shop/test_cart.py` and the `src/pages/browser/shop/` page objects. Replace any captured credentials with the environment-backed settings; do not commit real passwords or session data.
+
+### Native mobile: Appium Inspector Recorder
+
+Start the Appium server and target emulator/device using the setup in [Mobile My Demo App checks](#mobile-my-demo-app-checks). In Appium Inspector, set the server URL from `APPIUM_SERVER_URL`, add capabilities for the same platform, device, and app, then start a session. For the Android values in `.env.example`, the capabilities are:
+
+```json
+{
+  "platformName": "Android",
+  "appium:automationName": "UiAutomator2",
+  "appium:deviceName": "Pixel_8_Pro_API_35",
+  "appium:app": "https://github.com/saucelabs/my-demo-app-android/releases/download/2.3.0/mda-2.3.0-27.apk",
+  "appium:appWaitActivity": "com.saucelabs.mydemoapp.android.view.activities.MainActivity"
+}
+```
+
+In the Inspector toolbar, enable recording, choose the Python client, perform the flow, and copy the generated code from the Recorder tab. See the [Appium Inspector Recorder guide](https://appium.github.io/appium-inspector/latest/session-inspector/recorder/).
+
+Create the test under `tests/mobile/<domain>/test_<flow>.py` and put reusable locators and actions in `src/pages/mobile/<domain>/`. Use the existing `mobile_driver` fixture instead of the recorder's session-creation boilerplate, and use explicit waits and a final assertion. Follow `tests/mobile/shop/test_my_demo_app_cart.py` and `src/pages/mobile/shop/shop_page.py`; provide platform-specific locators when Android and iOS differ.
+
+### Identify and run the case
+
+Add the appropriate platform/domain markers and a unique `@pytest.mark.test_case(id="TEST-XX")` marker. `run_tests.sh` selects tests through this marker. For parametrized tests, put a distinct marker on each `pytest.param`; its separate `id=` argument is optional because pytest generates a display ID automatically.
+
+```sh
+./run_tests.sh TEST-08 --headed  # Browser example
+./run_tests.sh TEST-09           # Mobile example
+```
+
 ## Mobile My Demo App checks
 
 Install Appium and the driver for the platform. The mobile fixture starts a local Appium server when a selected mobile test needs it:
@@ -124,9 +167,9 @@ emulator -avd Pixel_8_Pro_API_35
 ./run_tests.sh all -m mobile
 ```
 
-The sample adds a catalog product to the cart and verifies the cart count. `MOBILE_APP_PATH` in `.env.example` points to the Sauce Labs Android APK; Appium downloads and installs it when starting the session. Use a local `.apk`/`.ipa` path instead if preferred.
+The sample adds a catalog product to the cart and verifies the cart count. `MOBILE_APP_PATH` in `.env.example` points to the Sauce Labs Android APK. The test passes this value to Appium as the `app` capability; use a build URL the Appium host can retrieve or a local `.apk`/`.ipa` path visible to that host.
 
-For an iOS simulator, select the simulator build in `.env`:
+For an iOS simulator, run Appium on macOS with Xcode and select the simulator build in `.env`:
 
 ```sh
 MOBILE_PLATFORM=iOS
@@ -156,7 +199,7 @@ Copy `.env.example` and change values for your target. The browser page's defaul
 | `MOBILE_PLATFORM` | `Android` | `Android` or `iOS` |
 | `MOBILE_DEVICE_NAME` | `Pixel_8_Pro_API_35` | Android AVD or iOS device name |
 | `MOBILE_UDID` | unset | Optional Appium device UDID; required to target a physical iOS device with the supplied IPA |
-| `MOBILE_APP_PATH` | Sauce Labs Android 2.3.0 APK URL | Appium app path or download URL; select the iOS IPA URL for iOS runs |
+| `MOBILE_APP_PATH` | Sauce Labs Android 2.3.0 APK URL | Appium `app` capability; local files must be visible to the Appium host and URLs retrievable by it; select an iOS build for iOS runs |
 | `MOBILE_APP_WAIT_ACTIVITY` | unset | Optional Android activity to wait for when startup redirects from the manifest launch activity |
 
 Browser profiles use Playwright device descriptors. For iPad Safari emulation, run `BROWSER_PROFILE=ipad PLAYWRIGHT_BROWSER=webkit python -m pytest -m browser`. Recording files can contain page content, cookies, headers, and request data; protect CI artifacts and use test accounts only.
@@ -167,4 +210,4 @@ Set `PLAYWRIGHT_HEADED=on` in `.env` to see the browser while tests run, or use 
 
 ## GitLab CI
 
-The YAML declares stages `lint`, `api`, `browser`, `ios`, and `android`, but API/browser jobs use `stage: test` and mobile jobs use `stage: mobile`; those names are not declared. GitLab normally rejects undeclared job stages, so validate or correct this mismatch before relying on the pipeline. The API and browser jobs request JUnit, HTML, and Playwright artifacts; Android and iOS jobs are gated by `RUN_ANDROID=true` and `RUN_IOS=true` and use `android` and `macos` runner tags. No Allure aggregation job is present. The mobile fixture may start a local Appium server or reuse a ready one. The iOS CI app URL points to an `.ipa`, which is not the simulator build.
+The YAML declares stages `lint`, `api`, `browser`, `ios`, and `android`, but API/browser jobs use `stage: test` and mobile jobs use `stage: mobile`; those names are not declared. GitLab normally rejects undeclared job stages, so validate or correct this mismatch before relying on the pipeline. The API and browser jobs request JUnit, HTML, and Playwright artifacts; Android and iOS jobs are gated by `RUN_ANDROID=true` and `RUN_IOS=true` and use `android` and `macos` runner tags. No Allure aggregation job is present. The mobile jobs install Python requirements only: runner hosts must provide Appium, the platform driver, SDK/Xcode, and device infrastructure. The iOS CI app URL points to an `.ipa`, which is not the simulator build.

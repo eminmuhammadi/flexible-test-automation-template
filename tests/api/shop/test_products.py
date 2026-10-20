@@ -17,19 +17,16 @@ class TestProducts:
                 1,
                 109.95,
                 marks=pytest.mark.test_case(id="TEST-01"),
-                id="TEST-01",
             ),
             pytest.param(
                 2,
                 22.30,
                 marks=pytest.mark.test_case(id="TEST-02"),
-                id="TEST-02",
             ),
             pytest.param(
                 3,
                 55.99,
                 marks=pytest.mark.test_case(id="TEST-03"),
-                id="TEST-03",
             ),
         ],
     )

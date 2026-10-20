@@ -18,6 +18,7 @@ This document is the implementation-aligned guide to the repository. It covers t
 - [10. Security and reliability](#10-security-and-reliability)
 - [11. Extension and maintenance](#11-extension-and-maintenance)
 - [12. Architecture decisions and limitations](#12-architecture-decisions-and-limitations)
+- [13. Portability and execution topologies](#13-portability-and-execution-topologies)
 
 ## 1. System overview
 
@@ -53,7 +54,7 @@ flowchart LR
   tests --> appium["Appium server"]
   appium --> device["Android emulator/device or iOS device/simulator"]
   device --> app["Sauce Labs My Demo App"]
-  appium -. may download configured app URL .-> releases["Sauce Labs release asset"]
+  appium -. app capability can reference URL .-> releases["Configured app release asset"]
   pytest --> results["Allure results, JUnit/HTML reports, Playwright artifacts"]
   results --> report["Allure CLI report or local watcher"]
 ```
@@ -277,11 +278,11 @@ There are no shared assertion helpers, test-data factories, database fixtures, l
 ### Runtime and external requirements
 
 - Python **3.12+** is the project-documented requirement; GitLab uses Python 3.12 images. The repository does not publish Python package metadata or an automated version check.
-- Node.js is used for the Allure CLI. The root README specifies Node 22+, while `package.json` does not declare an engines constraint.
+- `package.json` pins Allure CLI 3.21.0 but declares no Node.js engine constraint. Node.js/npm is needed to run that CLI. A locally installed Appium server also needs its Node.js/npm runtime; a runner that connects to a separately managed Appium server does not need to run Appium itself.
 - API/browser execution needs network access to the configured target. Chromium must be installed for local browser tests. Firefox or WebKit must also be installed if selected.
-- Mobile execution needs an Appium server, the matching Appium driver, an Android emulator/device or an iOS target, and the app build. To auto-start a local Appium server, the `appium` executable must be on PATH.
-- iOS device execution requires macOS/Xcode infrastructure outside this repository. The repository does not create or boot simulators, provision signing, or attach hardware.
-- npm and Node are not required for plain pytest runs or for the Python test code itself; they are needed for the bundled Allure CLI commands.
+- Mobile execution needs an Appium server, the matching Appium driver, an Android emulator/device or an iOS target, and the app build. A local app path must be visible to the Appium host; the code passes `MOBILE_APP_PATH` through as the Appium `app` capability. To auto-start a local server, the `appium` executable and its Node.js runtime must be on PATH. A remote Appium server owns those runtime requirements.
+- iOS Appium execution requires macOS/Xcode on the Appium host, which may be remote from the pytest client. The repository does not create or boot simulators, provision signing, or attach hardware.
+- npm and Node.js are needed for the bundled Allure CLI and for installing/running Appium locally. They are not needed for plain pytest runs against an already-running remote Appium server.
 
 ### Install
 
@@ -343,7 +344,7 @@ Default `pytest.ini` arguments clear `reports/allure-results` at the beginning o
 
 ### Mobile tools
 
-The project README's local setup uses Appium and one driver per platform:
+The local setup uses Node.js/npm to install Appium and one driver per platform. Run the iOS driver on the macOS Appium host:
 
 ```sh
 npm install --global appium
@@ -351,7 +352,7 @@ appium driver install uiautomator2  # Android
 appium driver install xcuitest      # iOS
 ```
 
-Start the Android AVD named by `MOBILE_DEVICE_NAME` before selecting mobile tests, unless targeting an already-connected device. The default sample app URL is configured in `.env.example`; `MOBILE_APP_PATH` may instead point to a local `.apk` or `.ipa`. For a remote Appium URL, the server must already be reachable and ready. A local auto-start is attempted only for an unreachable plain-HTTP loopback URL.
+Start the Android AVD named by `MOBILE_DEVICE_NAME` before selecting mobile tests, unless targeting an already-connected device. The default sample app URL is configured in `.env.example`; `MOBILE_APP_PATH` may instead point to a local `.apk` or `.ipa` visible to the Appium host. For a remote Appium URL, the server must already be reachable and ready. A local auto-start is attempted only for an unreachable plain-HTTP loopback URL.
 
 ## 6. Configuration reference
 
@@ -417,7 +418,7 @@ flowchart LR
 | `MOBILE_PLATFORM` | Code: `Android`; example: `Android`; GitLab jobs set Android/iOS | Case-insensitive `Android` or `iOS`; other values fail mobile option setup. |
 | `MOBILE_DEVICE_NAME` | Code: `Android Emulator`; example: `Pixel_8_Pro_API_35` | Appium device name; must correspond to the target available to Appium. |
 | `MOBILE_UDID` | Code: unset; example: unset | Optional device UDID. Added to Appium capabilities when nonempty. |
-| `MOBILE_APP_PATH` | Code: unset; example: Sauce Labs Android APK URL; CI sets a platform URL | Required when mobile options are created. Can be a local app path or a URL understood by Appium. |
+| `MOBILE_APP_PATH` | Code: unset; example: Sauce Labs Android APK URL; CI sets a platform URL | Required when mobile options are created. A local path must be visible to the Appium host; a URL must be retrievable by it. Passed through as the Appium `app` capability. |
 | `MOBILE_APP_WAIT_ACTIVITY` | Code: unset; example: Android MainActivity | Optional Android `appWaitActivity` capability. Not used for iOS. |
 | `PYTEST_ADDOPTS` | Unset | Standard pytest additional arguments; read by pytest and considered by the project browser-option default logic. |
 | `PYTHON` | Unset | Optional interpreter override for `run_tests.sh`; otherwise it prefers `.venv/bin/python`, then `python`, then `python3`. |
@@ -506,9 +507,11 @@ The checked-in [`.gitlab-ci.yml`](../.gitlab-ci.yml) declares:
 - Browser job using a Playwright 1.64 image, JUnit/HTML reports, and Playwright artifacts.
 - Android/iOS jobs with runner tags `android` and `macos`; both are gated by `RUN_ANDROID=true` or `RUN_IOS=true`. They request app builds through release URLs.
 
+The mobile jobs install the Python requirements only. They do not install Node.js, Appium, UiAutomator2/XCUITest drivers, Android SDK, Xcode, or provision a device. Their tagged runner hosts must already provide the matching service, driver, and device environment.
+
 However, the declared stages are `lint`, `api`, `browser`, `ios`, and `android`, while API/browser jobs specify `stage: test` and Android/iOS specify `stage: mobile`. Those two stage names are absent from the declared list. GitLab normally rejects jobs whose stage is not declared; the pipeline has not been validated against a GitLab instance here. Treat successful CI execution as **unverified until this mismatch is resolved or confirmed by CI configuration validation**.
 
-There is no Allure generation/aggregation job in the checked-in pipeline. CI artifacts are configured to expire after 7 days. The API/browser/mobile jobs publish their own results; the repository does not currently combine them into one downloadable Allure HTML report in CI. The `allurerc.json` history settings are local Allure CLI configuration, not a CI cache/serialization implementation.
+There is no Allure generation/aggregation job in the checked-in pipeline. CI artifacts are configured to expire after 7 days. If stage configuration is corrected, each job is configured to produce and publish its own result artifacts; the repository does not currently combine them into one downloadable Allure HTML report in CI. The `allurerc.json` history settings are local Allure CLI configuration, not a CI cache/serialization implementation.
 
 ```mermaid
 flowchart LR
@@ -711,6 +714,154 @@ These are implementation facts; they should not be read as recorded developer in
 
 The root README previously described a reporting test directory and dedicated CI reporting check that are absent from the tree, and claimed a final CI job generated a merged Allure report. Those claims were corrected to reflect the current YAML. Allure local history configuration remains documented as local CLI configuration; CI history persistence is not implemented in the current pipeline.
 
+## 13. Portability and execution topologies
+
+Portability is provided at a few explicit seams: pytest can select a browser engine/profile, Appium options switch between Android and iOS, and API/web/mobile endpoints can be configured. These seams do not make the sample scenarios application-agnostic: endpoints, JSON expectations, web selectors, and app accessibility IDs still target the named demo products.
+
+### Portability map
+
+```mermaid
+flowchart LR
+  tests["Python pytest suites"]
+  tests --> api["API tests"]
+  tests --> browser["Browser tests"]
+  tests --> mobile["Native mobile test"]
+  api --> apiTarget["Configured HTTP API; product schema remains fixed"]
+  browser --> playwright["Playwright"]
+  playwright --> engines["Chromium / Firefox / WebKit"]
+  playwright --> profile["Playwright device descriptor; emulation only"]
+  browser --> webTarget["Configured web URL; SauceDemo selectors remain"]
+  mobile --> client["Appium Python client"]
+  client --> endpoint["Configured HTTP(S) Appium endpoint"]
+  endpoint --> android["Android + UiAutomator2"]
+  endpoint --> ios["iOS + XCUITest"]
+  mobile --> appTarget["Configured My Demo App build"]
+  wrapper["Bash run_tests.sh"] --> tests
+  tests --> rawResults["Allure result files"]
+  rawResults --> allureCli["Node/npm Allure CLI"]
+  allureCli --> results["Local Allure report"]
+```
+
+### Supported selection and environmental limits
+
+| Surface | Selection implemented in the repository | External/environment requirement | Portability status |
+| --- | --- | --- | --- |
+| API | `API_BASE_URL`; tests call `/products/<id>` and assert Fake Store product fields. | Python dependencies and network access to a compatible API. | URL is configurable; schema and assertions are still specific to the sample API. |
+| Browser engine | `PLAYWRIGHT_BROWSER` or pytest-playwright browser options accept Chromium, Firefox, and WebKit. | Matching Playwright browser binaries on the runner. | Three engine names are supported by the configuration hook; the checked-in CI image is pinned to Playwright 1.64 and defaults to Chromium. |
+| Browser profile | `BROWSER_PROFILE` maps desktop, Pixel 7, iPhone 13, and iPad gen 5 descriptors; other Playwright device names are accepted. Explicit `--device` takes priority. | Device descriptor exists in the installed Playwright version. | Browser viewport/device emulation only; it does not use Android/iOS hardware. |
+| Android | `MOBILE_PLATFORM=Android` builds UiAutomator2 capabilities; the page object uses Android resource IDs. | Appium server, UiAutomator2 driver, Android SDK, and available emulator/device. | Code path exists; the repository does not install the driver or provision the device. |
+| iOS | `MOBILE_PLATFORM=iOS` builds XCUITest capabilities; the page object uses iOS accessibility IDs. | Appium XCUITest driver and macOS/Xcode on the Appium host. A simulator build or a device-compatible IPA is required for the chosen target. | Code path exists. CI passes an IPA, so that CI target requires a physical device; the README's simulator example uses a simulator build. |
+| Shell wrapper | `run_tests.sh` sources `.env`, selects Python, and builds pytest arguments. | Bash and Unix-like shell utilities. | The wrapper is not a native PowerShell script. Windows use through WSL/Git Bash is not verified. |
+| Local Appium auto-start | The fixture starts only unreachable plain-HTTP loopback Appium and manages its process group. | Appium CLI plus its Node runtime; POSIX process-group support. | The process-management code uses POSIX process-group APIs, so local auto-start is not portable to Windows. A ready external server avoids that child-process path; Windows test execution remains unverified. |
+| Reports | Python writes result/artifact paths under `reports/`; npm scripts invoke Allure. | Writable workspace; Node.js/npm for Allure CLI. | Output paths are relative to the test working directory. The wrapper changes to the repository root; direct commands should be run there for the documented paths. |
+
+These are code/configuration capabilities, not a cross-platform certification. The API sample was executed in the current environment. Browser and mobile runtime combinations were not executed as part of this documentation pass.
+
+### Browser engine and profile routing
+
+Engine and profile are separate choices. The engine controls the browser implementation. The profile selects a Playwright descriptor that applies device emulation settings. The source-defined shortcut names map to descriptors; other values must match an entry in `playwright.devices`.
+
+```mermaid
+flowchart TB
+  browserProfile["BROWSER_PROFILE or --device"]
+  browserEngine["PLAYWRIGHT_BROWSER or --browser"]
+  browserProfile --> map{"Profile mapping"}
+  map -->|desktop| noEmulation["No device descriptor"]
+  map -->|mobile| pixel["Pixel 7 descriptor"]
+  map -->|iphone| iphone["iPhone 13 descriptor"]
+  map -->|ipad| ipad["iPad gen 5 descriptor"]
+  map -->|other value| lookup["Exact Playwright device name"]
+  browserEngine --> engine{"Installed engine"}
+  engine --> chromium["Chromium"]
+  engine --> firefox["Firefox"]
+  engine --> webkit["WebKit"]
+  noEmulation --> page["pytest-playwright context and page"]
+  pixel --> page
+  iphone --> page
+  ipad --> page
+  lookup --> page
+  chromium --> page
+  firefox --> page
+  webkit --> page
+  page --> selectors["SauceDemo page-object selectors"]
+```
+
+To target iPad Safari emulation, combine the iPad profile with WebKit and install the WebKit binary. That does not verify behavior on a physical iPad or installed Safari.
+
+### Native mobile routing
+
+The capability builder and the page object both branch on platform. Android alone receives the optional `MOBILE_APP_WAIT_ACTIVITY`; both platforms can receive a UDID. The server endpoint can be an already-running local or remote service. If it is unreachable, the fixture only attempts a child process for an HTTP loopback address.
+
+```mermaid
+flowchart TB
+  platform["MOBILE_PLATFORM"]
+  appPath["Required MOBILE_APP_PATH"]
+  deviceName["MOBILE_DEVICE_NAME and optional MOBILE_UDID"]
+  platform --> options["build_mobile_options"]
+  appPath --> options
+  deviceName --> options
+  waitActivity["Optional MOBILE_APP_WAIT_ACTIVITY"]
+  waitActivity --> androidOptions["Android options only"]
+  options -->|Android| androidOptions
+  androidOptions --> uia2["UiAutomator2 capabilities"]
+  options -->|iOS| iosOptions["XCUITest capabilities"]
+  uia2 --> appium["APPIUM_SERVER_URL"]
+  iosOptions --> appium
+  appium --> status{"GET /status ready?"}
+  status -->|yes| reuse["Reuse existing Appium server"]
+  status -->|unreachable loopback HTTP| start["Start and later stop owned Appium process"]
+  status -->|remote/HTTPS unreachable or malformed| fail["Fail fixture setup"]
+  reuse --> driver["Function-scoped WebDriver"]
+  start --> driver
+  driver --> pageObject["ShopPage"]
+  pageObject --> androidLocators["Android resource IDs"]
+  pageObject --> iosLocators["iOS accessibility IDs"]
+```
+
+The test runner does not call Android/iOS operating-system APIs directly: platform interaction goes through the Appium server and its installed driver. App reset semantics, device provisioning, and installation of platform tooling are not explicitly managed by this repository.
+
+### Local and CI topology
+
+The diagram shows the declared execution environments, not proof that the current GitLab pipeline runs. The `test`/`mobile` stage mismatch described in Section 8 must be addressed or validated first.
+
+```mermaid
+flowchart LR
+  subgraph local["Local developer workspace"]
+    shell["Bash wrapper or direct pytest"]
+    python["Python 3.12+ test process"]
+    localReports["reports/ output"]
+    shell --> python
+    python --> localReports
+  end
+  subgraph ci["GitLab job environments as declared"]
+    apiJob["API: python:3.12-slim"]
+    browserJob["Browser: Playwright 1.64 Linux image"]
+    androidJob["Android: tagged runner, opt-in"]
+    iosJob["iOS: macos tagged runner, opt-in"]
+    jobArtifacts["Per-job JUnit, HTML, and reports artifacts"]
+    apiJob --> jobArtifacts
+    browserJob --> jobArtifacts
+    androidJob --> jobArtifacts
+    iosJob --> jobArtifacts
+  end
+  python --> apiService["Configured API / web demo"]
+  python --> webService["Configured SauceDemo"]
+  python --> appiumEndpoint["Local or remote Appium"]
+  appiumEndpoint --> device["Android or iOS device"]
+  localReports --> allure["Optional Node/npm Allure CLI"]
+```
+
+The Linux API/browser jobs install Python requirements in their images. The mobile job definitions install only Python requirements and set app/platform variables; they rely on runner-provided Appium, matching drivers, SDK/Xcode, and devices. The CI YAML does not define a unified artifact merge or a portability test matrix.
+
+### Portability checklist when changing a target
+
+1. **API:** update `API_BASE_URL` and verify the path, response fields, and prices asserted by `test_products.py`; changing the URL alone does not adapt the assertions.
+2. **Browser:** update `WEB_BASE_URL` and matching credentials, then confirm the selectors in `LoginPage`, `InventoryPage`, and `CartPage`. Install the chosen browser engine in every runner image.
+3. **Android:** provide an Android-compatible app build, Appium server, UiAutomator2 driver, and device; update resource IDs and optional launch activity where the app requires them.
+4. **iOS:** provide a simulator build for Simulator or a device-compatible IPA for a physical device, install XCUITest, and supply a UDID when needed. Check accessibility IDs against the selected app build.
+5. **Runner/shell:** preserve Python and pinned Playwright compatibility, ensure report directories are writable, and provide a ready remote Appium server or a POSIX host for local auto-start. Make local app files available on the Appium host.
+6. **CI:** validate job stages and runner prerequisites in GitLab before relying on this pipeline. The checked-in YAML currently has undeclared job stages and no mobile tooling installation.
+
 ### Verification status
 
-Repository structure, Python source, pytest configuration, package manifests, sample environment, helper script, and CI YAML were inspected. The Graphify graph query was used for navigation but contained stale nodes not present in the current source tree; source and configuration files were treated as authoritative. The CI pipeline was not submitted to GitLab for validation, and browser/mobile external runs are not claimed as verified.
+Repository structure, Python source, pytest configuration, package manifests, sample environment, helper script, and CI YAML were inspected. The documentation pass verified the Ruff check, collected seven pytest cases, and ran the three API cases successfully with `API_BASE_URL` explicitly configured. Local Markdown links and fenced blocks were checked. Browser and mobile runtime combinations were not run, the GitLab pipeline was not submitted for validation, and a Mermaid renderer was unavailable; diagram syntax was reviewed but not renderer-validated.
