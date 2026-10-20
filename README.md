@@ -4,6 +4,8 @@ A pytest project for API, browser, and native mobile checks. Playwright handles 
 
 Start here to run the examples. The [technical guide](docs/README.md) covers configuration, mobile setup, reporting, CI, and adding scenarios.
 
+The [architectural solution and adoption rationale](docs/ARCHITECTURE.md) explains why a shared harness is useful, how its boundaries support maintenance and diagnosis, and what the team should establish before using it as a release gate.
+
 ## Get started
 
 Use **Python 3.12** to match the current CI jobs and Ruff target. From the repository root:

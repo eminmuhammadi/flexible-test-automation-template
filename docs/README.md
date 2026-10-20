@@ -2,6 +2,8 @@
 
 This guide follows the code and configuration in this repository. For installation and your first run, start with the [root README](../README.md).
 
+For design rationale, expected engineering benefits, and adoption criteria, read the [architectural solution](ARCHITECTURE.md).
+
 ## Contents
 
 - [1. System overview](#1-system-overview)
