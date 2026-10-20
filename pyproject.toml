@@ -7,4 +7,4 @@ src = ["src", "src/platform"]
 select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "mobile", "pages", "platform_plugin"]
+known-first-party = ["config", "domains", "mobile", "platform_plugin"]

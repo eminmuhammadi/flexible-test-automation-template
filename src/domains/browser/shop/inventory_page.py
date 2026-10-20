@@ -1,6 +1,6 @@
 from playwright.sync_api import Locator, Page
 
-from pages.browser.shop.cart_page import CartPage
+from domains.browser.shop.cart_page import CartPage
 
 
 class InventoryPage:

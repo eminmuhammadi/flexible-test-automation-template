@@ -3,7 +3,7 @@ import pytest
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from config.settings import Settings
-from pages.mobile.shop.shop_page import ShopPage
+from domains.mobile.shop.shop_page import ShopPage
 
 
 @pytest.mark.mobile

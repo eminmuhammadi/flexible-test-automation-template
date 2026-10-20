@@ -104,10 +104,9 @@ def settings() -> Settings:
 
 @pytest.fixture
 def api_request_context(
-    settings: Settings, playwright: Playwright,
+    playwright: Playwright,
 ) -> Generator[APIRequestContext, None, None]:
     request = playwright.request.new_context(
-        base_url=settings.api_base_url,
         extra_http_headers={"Accept": "application/json"},
     )
     try:

@@ -2,7 +2,7 @@ import allure
 import pytest
 from playwright.sync_api import Page, expect
 
-from pages.browser.shop.login_page import LoginPage
+from domains.browser.shop.login_page import LoginPage
 
 
 @pytest.mark.browser

@@ -1,9 +1,7 @@
 stages:
   - lint
-  - api
-  - browser
-  - ios
-  - android
+  - test
+  - mobile
 
 variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -32,7 +30,10 @@ lint:
 
 api:
   stage: test
-  image: python:3.12-slim
+  parallel:
+    matrix:
+      - PYTHON_VERSION: ["3.12"]
+  image: "python:${PYTHON_VERSION}-slim"
   before_script:
     - python -m pip install -r requirements.txt
     - mkdir -p reports
@@ -48,12 +49,15 @@ api:
 
 browser:
   stage: test
+  parallel:
+    matrix:
+      - BROWSER_ENGINE: [chromium, firefox, webkit]
   image: mcr.microsoft.com/playwright/python:v1.64.0-noble
   before_script:
     - python -m pip install -r requirements.txt
     - mkdir -p reports
   script:
-    - python -m pytest tests/browser/shop -m browser --alluredir=reports/browser/allure-results --clean-alluredir --output=reports/playwright --html=reports/browser.html --self-contained-html --junitxml=reports/browser.xml
+    - python -m pytest tests/browser/shop -m browser --browser "$BROWSER_ENGINE" --alluredir=reports/browser/allure-results --clean-alluredir --output=reports/playwright --html=reports/browser.html --self-contained-html --junitxml=reports/browser.xml
   artifacts:
     when: always
     expire_in: 7 days

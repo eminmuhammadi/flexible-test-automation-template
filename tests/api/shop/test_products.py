@@ -2,6 +2,8 @@ import allure
 import pytest
 from playwright.sync_api import APIRequestContext
 
+from domains.api.shop.products_page import ProductsPage
+
 
 @pytest.mark.api
 @pytest.mark.shop
@@ -36,8 +38,9 @@ class TestProducts:
         product_id: int,
         expected_price: float,
     ) -> None:
+        products_page = ProductsPage(api_request_context)
         with allure.step(f"Request product {product_id}"):
-            response = api_request_context.get(f"/products/{product_id}")
+            response = products_page.get_product(product_id)
             allure.attach(
                 f"GET /products/{product_id}\nHTTP {response.status}",
                 name="API response summary",
