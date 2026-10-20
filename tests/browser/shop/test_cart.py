@@ -8,31 +8,32 @@ from pages.browser.shop.login_page import LoginPage
 @pytest.mark.browser
 @pytest.mark.shop
 @pytest.mark.regression
-@allure.epic("QA Automation Platform")
-@allure.feature("Browser")
-@allure.story("Shopping cart")
+@allure.epic("Saucedemo Shop")
+@allure.story("As a user, I want to add products to the cart")
 class TestCart:
-    @allure.title("{product_name} can be added to the cart")
+    @allure.title("Add {product_name} to the cart on {browser_name}")
     @pytest.mark.parametrize(
         ("product", "product_name"),
         [
             pytest.param(
-                "backpack", "Sauce Labs Backpack",
-                marks=[pytest.mark.smoke, pytest.mark.test_case(id="TEST-04")],
-                id="TEST-04",
+                "backpack",
+                "Sauce Labs Backpack",
+                marks=pytest.mark.test_case(id="TEST-04"),
+                id="backpack",
             ),
             pytest.param(
-                "bike-light", "Sauce Labs Bike Light",
+                "bike-light",
+                "Sauce Labs Bike Light",
                 marks=pytest.mark.test_case(id="TEST-05"),
-                id="TEST-05",
+                id="bike-light",
             ),
             pytest.param(
-                "bolt-t-shirt", "Sauce Labs Bolt T-Shirt",
+                "bolt-t-shirt",
+                "Sauce Labs Bolt T-Shirt",
                 marks=pytest.mark.test_case(id="TEST-06"),
-                id="TEST-06",
+                id="bolt-t-shirt",
             ),
         ],
-        ids=("backpack", "bike-light", "bolt-t-shirt"),
     )
     def test_standard_user_can_add_product_to_cart(
         self, page: Page, product: str, product_name: str

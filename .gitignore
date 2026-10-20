@@ -11,3 +11,5 @@ node_modules/
 .coverage
 .DS_Store
 *_cache
+graphify-out/
+.codex

@@ -1,5 +1,9 @@
 {
   "name": "QA Automation Platform",
+  "output": "reports/allure-report",
+  "resultsDir": ["reports/allure-results", "reports/*/allure-results"],
+  "historyPath": "reports/allure-history.jsonl",
+  "historyLimit": 30,
   "plugins": {
     "awesome": {
       "options": {

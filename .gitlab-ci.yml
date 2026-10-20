@@ -61,6 +61,21 @@ browser:
     paths:
       - reports/
 
+reporting:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install -r requirements.txt
+  script:
+    - python -m pytest tests/reporting -q --alluredir=reports/reporting/allure-results --junitxml=reports/reporting.xml
+  artifacts:
+    when: always
+    expire_in: 7 days
+    reports:
+      junit: reports/reporting.xml
+    paths:
+      - reports/reporting/
+
 android:
   stage: mobile
   tags:
@@ -112,6 +127,11 @@ ios:
 allure-report:
   stage: report
   image: node:22-bookworm-slim
+  resource_group: "allure-history-$CI_COMMIT_REF_SLUG"
+  cache:
+    key: "allure-history-$CI_COMMIT_REF_SLUG"
+    paths:
+      - reports/allure-history.jsonl
   needs:
     - job: api
       artifacts: true
@@ -132,3 +152,4 @@ allure-report:
     expire_in: 30 days
     paths:
       - reports/allure-report/
+      - reports/allure-history.jsonl

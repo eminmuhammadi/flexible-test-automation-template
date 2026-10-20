@@ -12,12 +12,15 @@ src/
 └── platform/                      # Shared test setup
     ├── config/settings.py         # Environment-backed settings
     ├── mobile/options.py          # Appium capabilities
-    └── platform_plugin.py        # pytest fixtures and Playwright configuration
+    ├── platform_plugin.py         # Shared fixtures, configuration, plugin registration
+    └── reporting_plugin.py        # Allure metadata and failure screenshots
 tests/
 ├── api/shop/
 ├── browser/shop/
 └── mobile/shop/
 ```
+
+`tests/conftest.py` loads `platform_plugin`; that plugin registers `reporting_plugin`. Change shared fixtures and lifecycle settings in `src/platform/platform_plugin.py`, and Allure metadata, labels, and failure attachments in `src/platform/reporting_plugin.py`. Test folders can override fixtures in their own `conftest.py` files using normal pytest rules.
 
 API tests use Playwright's `APIRequestContext`. Browser and mobile tests use page objects under `src/pages/<platform>/<domain>/`. Tests live under `tests/<platform>/<domain>/` and carry pytest markers and `TEST-01`, `TEST-02`, … case IDs.
 
@@ -45,9 +48,34 @@ npx allure generate reports/*/allure-results --output reports/allure-report --cl
 npx allure open reports/allure-report
 ```
 
-The generated report is a single HTML file with interactive test summaries and charts. API, browser, and mobile results are kept in separate directories and merged into the same report. The mobile test appears under the **Mobile** feature with its Appium steps and `TEST-07` case ID. The example commands use separate result directories because the default pytest configuration clears `allure-results/` at the start of each run.
+The generated report is a single HTML file with interactive test summaries and charts. API, browser, and mobile results are kept in separate directories and merged into the same report. The mobile test appears under the **Mobile** feature with its Appium steps and `TEST-07` case ID. Direct pytest runs write Allure results to `reports/allure-results/` and Playwright artifacts to `reports/playwright/` by default. The example commands use separate result directories because the default pytest configuration clears `reports/allure-results/` at the start of each run.
 
-The tests read environment variables; they do not load `.env` themselves. `.env.example` selects the Android `Pixel_8_Pro_API_35` AVD. Start that AVD and the Appium server before running mobile checks. Appium must inherit the Android SDK environment (`ANDROID_HOME` or `ANDROID_SDK_ROOT`).
+The tests read environment variables; they do not load `.env` themselves. `.env.example` selects the Android `Pixel_8_Pro_API_35` AVD. Start that AVD before running mobile checks. Appium must inherit the Android SDK environment (`ANDROID_HOME` or `ANDROID_SDK_ROOT`).
+
+## Allure reporting
+
+Run a case and generate its HTML report in one command, then open it locally:
+
+```sh
+npm run test:report -- TEST-07
+npm run report:open
+```
+
+Use `all` instead of a case ID to run the full suite; extra pytest arguments work as usual, for example `npm run test:report -- all -m api`. Allure builds the report even when tests fail and preserves the failing exit status. This command reports only results written by that run. To combine existing results from direct pytest runs and tagged runs, use `npm run report`.
+
+For a live view, start the watcher and run tests in another terminal:
+
+```sh
+npm run report:watch
+# In another terminal:
+./run_tests.sh all
+```
+
+Open the local address printed by the watcher. It discovers new result directories and refreshes as tests finish. The live report is stored in `reports/allure-live/`; it does not overwrite the static report or append partial runs to history. Both viewing commands bind to `127.0.0.1`.
+
+Test titles identify the product and browser or mobile platform. Reports include API, Browser, and Mobile features, mobile platform/device parameters, runtime versions, API status summaries, and screenshots for browser/mobile failures during setup or test execution when a driver is available. Screenshot capture errors appear as diagnostic attachments and preserve the original failure. Full API bodies, credentials, and environment variables are not automatically copied into report metadata; screenshots and existing pytest output can still contain sensitive test data.
+
+Static reports keep the latest 30 launches in `reports/allure-history.jsonl` for history and trend charts. Rebuilding a report adds a history entry; run one static generator at a time and retain the history file between runs. GitLab caches it per branch and serializes report generation for that branch; history availability depends on the runner's cache storage.
 
 ## Lint
 
@@ -55,9 +83,10 @@ Ruff checks Python style, common errors, and import order. Run it before committ
 
 ```sh
 python -m ruff check src tests
+python -m pytest tests/reporting -q
 ```
 
-The same check runs as a separate GitLab CI job.
+Lint and the reporting regression check run in separate GitLab CI jobs. The reporting check uses local fake drivers and needs no external services or devices.
 
 ## Run tests
 
@@ -68,17 +97,17 @@ Use `run_tests.sh` with a pytest case tag to run that case, or `all` to run ever
 ./run_tests.sh TEST-04 --headed
 ./run_tests.sh TEST-07
 npx allure generate reports/test-*/allure-results --output reports/allure-report --clean
-./run_tests.sh all --slowmo=0
+./run_tests.sh all
 npx allure generate reports/all/allure-results --output reports/allure-report --clean
 ```
 
-The script loads `.env` automatically when present. Copy `.env.example` to `.env` and set a valid `MOBILE_APP_PATH` before running `TEST-07`. When selected tests include the `mobile` marker, it reuses Appium if available or starts the locally configured server and stops only the process it started. Remote Appium servers must already be running. Tagged results are written under `reports/<tag>/allure-results`; an `all` run writes to `reports/all/allure-results`. Use pytest options such as `-m smoke`, `-m mobile`, or `-k <expression>` to filter tests.
+The script loads `.env` automatically when present. Copy `.env.example` to `.env` and set a valid `MOBILE_APP_PATH` before running `TEST-07`. The mobile fixture checks Appium only when a mobile test runs, whether invoked through the script or directly with pytest. It reuses a ready server or starts a local one, writes its output to `reports/appium.log`, and stops only the process it started. Remote Appium servers must already be running. Tagged results are written under `reports/<tag>/allure-results`; an `all` run writes to `reports/all/allure-results`. Use pytest options such as `-m api`, `-m mobile`, or `-k <expression>` to filter tests; repeated `-m` expressions in the script are combined with the case tag.
 
-The default Playwright slow motion is **1,000 ms** per browser action. Override it with `--slowmo=<milliseconds>`, for example `--slowmo=0`. Select a single case with `-m "test_case(id='TEST-01')"`; use `-m smoke` for smoke cases or `-m regression` for regression cases.
+Browser actions run without an added delay by default. Pass `--slowmo=1000` when you want a visible one-second pause per action. Select a single case with `-m "test_case(id='TEST-01')"`; use `-m api` for API cases or `-m regression` for regression cases.
 
 ## Mobile My Demo App checks
 
-Install Appium and the driver for the platform. The test script starts a local Appium server when a selected mobile test needs it:
+Install Appium and the driver for the platform. The mobile fixture starts a local Appium server when a selected mobile test needs it:
 
 ```sh
 npm install --global appium
@@ -131,8 +160,10 @@ Copy `.env.example` and change values for your target. The browser page's defaul
 
 Browser profiles use Playwright device descriptors. For iPad Safari emulation, run `BROWSER_PROFILE=ipad PLAYWRIGHT_BROWSER=webkit python -m pytest -m browser`. Recording files can contain page content, cookies, headers, and request data; protect CI artifacts and use test accounts only.
 
+The `PLAYWRIGHT_BROWSER`, `PLAYWRIGHT_HEADED`, `PLAYWRIGHT_TRACING`, and `PLAYWRIGHT_VIDEO` environment variables supply defaults. Explicit pytest arguments, `PYTEST_ADDOPTS`, and pytest configuration take precedence. Multiple `--browser` options select multiple engines. Use `--tracing=retain-on-failure --output=reports/playwright` to keep traces for failing browser or API tests; inspect a retained `trace.zip` with `python -m playwright show-trace <path-to-trace.zip>`.
+
 Set `PLAYWRIGHT_HEADED=on` in `.env` to see the browser while tests run, or use `PLAYWRIGHT_HEADED=off` for headless runs. The Playwright `--headed` command-line option overrides the environment setting.
 
 ## GitLab CI
 
-The API and browser jobs run by default and publish JUnit, HTML, and Playwright artifacts. A final CI job combines their Allure results, plus any enabled mobile results, into `reports/allure-report/` as a downloadable single-file HTML artifact retained for 30 days. Android and iOS jobs are opt-in with `RUN_ANDROID=true` and `RUN_IOS=true`; configure matching `android` and `macos` runner tags and provide the Appium server and device. iOS requires macOS, Xcode, and a physical device because the supplied IPA is not simulator-compatible. The mobile jobs install the corresponding My Demo App build from its release URL.
+The API and browser jobs run by default and publish JUnit, HTML, and Playwright artifacts. A final CI job combines their Allure results, plus any enabled mobile results, into `reports/allure-report/` as a downloadable single-file HTML artifact retained for 30 days. Android and iOS jobs are opt-in with `RUN_ANDROID=true` and `RUN_IOS=true`; configure matching `android` and `macos` runner tags and provide a device. The mobile fixture starts Appium locally if needed, or reuses a ready server. iOS requires macOS, Xcode, and a physical device because the supplied IPA is not simulator-compatible. The mobile jobs install the corresponding My Demo App build from its release URL.

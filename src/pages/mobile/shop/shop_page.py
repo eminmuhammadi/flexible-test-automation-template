@@ -1,4 +1,3 @@
-import allure
 from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
@@ -22,7 +21,6 @@ class ShopPage:
         self._driver = driver
         self._platform = platform.casefold()
 
-    @allure.step("Add a catalog product to the cart")
     def add_product_to_cart(self) -> None:
         if self._platform == "android":
             products = WebDriverWait(self._driver, self.WAIT_SECONDS).until(
@@ -40,7 +38,6 @@ class ShopPage:
         self._tap(self.IOS_ADD_TO_CART)
         self._tap(self.IOS_CART_BUTTON)
 
-    @allure.step("Verify one item is shown in the cart")
     def cart_has_one_item(self) -> bool:
         locator = (
             (AppiumBy.ID, self.ANDROID_CART_COUNT_ID)
